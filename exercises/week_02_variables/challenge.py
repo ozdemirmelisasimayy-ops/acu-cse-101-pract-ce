@@ -12,6 +12,10 @@
 # Calculate the total cost and print it labeled "Total cost:".
 # ------------------------------------------------------------------------------
 # TODO: Write your code for Challenge 1 below:
+notebook_number = int(input(f"enter the number of notebooks:"))
+notebook_price = 20
+total_cost = notebook_price * notebook_number
+print(f"total cost: {total_cost}")
 
 
 # ------------------------------------------------------------------------------
@@ -20,7 +24,10 @@
 # Calculate the break's length in seconds and print it labeled "Seconds:".
 # ------------------------------------------------------------------------------
 # TODO: Write your code for Challenge 2 below:
-
+break_minute = int(input(f"enter the time in minutes: "))
+minute_to_seconds = 60
+break_seconds = minute_to_seconds * break_minute
+print(f"seconds: {break_seconds}")
 
 # ------------------------------------------------------------------------------
 # Challenge 3: Simple Greeting
@@ -28,3 +35,9 @@
 # Use the variable to print "Hello, Ada!".
 # ------------------------------------------------------------------------------
 # TODO: Write your code for Challenge 3 below:
+name= str(input(f"enter your name:"))
+name_variable= name
+print(f"Name: Hello, {name_variable}!")
+
+
+

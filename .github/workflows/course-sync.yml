@@ -1,0 +1,47 @@
+name: Sync course and prepare student branches
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # GitHub cron uses UTC: Monday 11:30 UTC = 14:30 Europe/Istanbul.
+    - cron: "30 11 * * 1"
+  workflow_dispatch:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: course-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.event_name != 'pull_request_target' || github.repository == 'Krr0ptioN/acu-cse-101-pract-ce'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Always use trusted course code, including for PR metadata routing.
+      - uses: actions/checkout@v4
+        with:
+          repository: Krr0ptioN/acu-cse-101-pract-ce
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure Git authentication
+        env:
+          GH_TOKEN: ${{ secrets.COURSE_SYNC_TOKEN || github.token }}
+        run: gh auth setup-git
+      - name: Sync forks and route submissions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COURSE_SYNC_TOKEN: ${{ secrets.COURSE_SYNC_TOKEN }}
+          # gh credential helper uses the cross-repository token when supplied.
+          GH_HOST: github.com
+        run: python3 scripts/course_automation.py

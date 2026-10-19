@@ -13,9 +13,18 @@ Usage:
 
 import argparse
 import glob
+import json
 import os
 import subprocess
 import sys
+import tempfile
+
+try:
+    from .course_automation import COURSE_REPOSITORY, student_login
+    from .sync_course import checked_git, switch_to_workspace, workspace_lock
+except ImportError:
+    from course_automation import COURSE_REPOSITORY, student_login
+    from sync_course import checked_git, switch_to_workspace, workspace_lock
 
 # Terminal styling constants
 GREEN = "\033[92m"
@@ -128,113 +137,86 @@ def get_current_branch(repo_dir: str) -> str:
         return "main"
 
 
-def ensure_committed(repo_dir: str):
-    """Ensure all current work in exercises is committed."""
-    curr_branch = get_current_branch(repo_dir)
-    if curr_branch == "main":
-        subprocess.run(
-            ["git", "checkout", "-B", "workspace"],
-            cwd=repo_dir,
-            check=False,
-        )
-        print("🔀 Switched to 'workspace' branch to keep 'main' clean.")
-
-    subprocess.run(["git", "add", "exercises/"], cwd=repo_dir, check=False)
-    status = subprocess.run(
-        ["git", "status", "--porcelain", "exercises/"],
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=False,
+def run_gh(repo_dir: str, args: list[str], body: str | None = None):
+    result = subprocess.run(
+        ["gh", *args], cwd=repo_dir, input=body, capture_output=True,
+        text=True, check=False,
     )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+    return result.stdout.strip()
+
+
+def ensure_committed(repo_dir: str):
+    """Save exercise edits without resetting the persistent workspace branch."""
+    switch_to_workspace(repo_dir)
+    checked_git(["add", "exercises/"], repo_dir)
+    status = checked_git(["status", "--porcelain", "exercises/"], repo_dir)
     if status.stdout.strip():
-        subprocess.run(
-            ["git", "commit", "-m", "Pre-submission snapshot"],
-            cwd=repo_dir,
-            check=False,
-        )
+        checked_git(["commit", "-m", "Pre-submission snapshot", "--", "exercises/"], repo_dir)
 
 
 def handle_submission(repo_dir: str, week: str):
-    """Creates a submission branch and opens or pushes the pull request."""
+    """Submit this week's files to the student's persistent course branch."""
+    with workspace_lock(repo_dir):
+        _submit(repo_dir, week)
+
+
+def _submit(repo_dir: str, week: str):
+    if week not in get_available_weeks(repo_dir):
+        raise RuntimeError("Unknown exercise week.")
+    # Resolve the actual fork owner, never a guessed Git identity or local branch.
+    origin = checked_git(["remote", "get-url", "origin"], repo_dir).stdout.strip()
+    fork = json.loads(run_gh(repo_dir, ["repo", "view", origin, "--json", "nameWithOwner,owner,parent,isFork"]))
+    parent = fork.get("parent") or {}
+    if not fork.get("isFork") or f"{parent.get('owner', {}).get('login', '')}/{parent.get('name', '')}".lower() != COURSE_REPOSITORY.lower():
+        raise RuntimeError("Submit from your personal fork of the course repository.")
+    username = student_login(fork["owner"]["login"])
+    # The central action owns branch creation; student tokens need no course write access.
+    try:
+        run_gh(repo_dir, ["api", f"repos/{COURSE_REPOSITORY}/git/ref/heads/{username}"])
+    except RuntimeError as error:
+        raise RuntimeError(f"Your course branch '{username}' is not ready. Ask your instructor to run the course sync action.") from error
+
     ensure_committed(repo_dir)
-
     original_branch = get_current_branch(repo_dir)
-    if original_branch == "main":
-        subprocess.run(
-            ["git", "checkout", "-B", "workspace"], cwd=repo_dir, check=False
-        )
-        original_branch = "workspace"
-
+    source = checked_git(["rev-parse", "HEAD"], repo_dir).stdout.strip()
     branch_name = f"submit/{week}"
-    print(f"\n{BOLD}{CYAN}🚀 Preparing Submission Branch: {branch_name}{RESET}")
-
-    # Switch to / create branch
-    subprocess.run(["git", "checkout", "-B", branch_name], cwd=repo_dir, check=False)
-
-    # Push to origin
-    print("📡 Pushing submission branch to your GitHub fork...")
-    push_res = subprocess.run(
-        ["git", "push", "-u", "origin", branch_name, "--force"],
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    if push_res.returncode != 0:
-        print(
-            f"{YELLOW}Note on push:{RESET} {push_res.stderr.strip() or push_res.stdout.strip()}"
-        )
-
-    # Attempt to create PR using GitHub CLI (gh)
-    print("\n📬 Opening Pull Request to Course Repository...")
-    pr_title = f"Submission: {week}"
-    pr_body = f"Automated submission for `{week}`.\n\nAll local unit tests passed successfully."
-
-    pr_res = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--title",
-            pr_title,
-            "--body",
-            pr_body,
-            "--head",
-            branch_name,
-            "--base",
-            "main",
-        ],
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    if pr_res.returncode == 0:
-        pr_url = pr_res.stdout.strip()
-        print(f"\n{GREEN}{BOLD}🎉 Submission Successful!{RESET}")
-        print(f"🔗 Pull Request: {CYAN}{pr_url}{RESET}")
-        print(
-            "Your Teaching Assistants will review your submission and automated tests will grade it."
-        )
-    else:
-        # Fallback if gh CLI is unauthenticated or PR already exists
-        err_msg = pr_res.stderr.strip()
-        if "already exists" in err_msg:
-            print(
-                f"\n{GREEN}{BOLD}✅ Existing PR updated with your latest changes!{RESET}"
-            )
-        else:
-            print(f"\n{YELLOW}{BOLD}Branch '{branch_name}' pushed successfully!{RESET}")
-            print(
-                "To finish creating your Pull Request, visit your GitHub repository page and click 'Compare & Pull Request'."
-            )
-
-    # Return back to working branch
-    print(f"\n↩️  Returning to working branch '{original_branch}'...")
-    subprocess.run(["git", "checkout", original_branch], cwd=repo_dir, check=False)
+    print(f"Preparing {username}:{branch_name} → {COURSE_REPOSITORY}:{username}")
+    checked_git(["fetch", "origin", "+refs/heads/*:refs/remotes/origin/*"], repo_dir)
+    checked_git(["fetch", f"https://github.com/{COURSE_REPOSITORY}.git", f"refs/heads/{username}"], repo_dir)
+    try:
+        checked_git(["checkout", "-B", branch_name, "FETCH_HEAD"], repo_dir)
+        # Base each submission on the instructor's retained work; include only this week.
+        checked_git(["restore", f"--source={source}", "--staged", "--worktree", "--", f"exercises/{week}"], repo_dir)
+        changed = checked_git(["diff", "--cached", "--name-only"], repo_dir).stdout.strip()
+        if not changed:
+            print("This week's files already match your course branch; nothing new to submit.")
+            return
+        checked_git(["commit", "-m", f"Submission: {week}"], repo_dir)
+        checked_git(["push", "--force-with-lease", "origin", f"HEAD:refs/heads/{branch_name}"], repo_dir)
+        existing = json.loads(run_gh(repo_dir, [
+            "api", "--method", "GET", f"repos/{COURSE_REPOSITORY}/pulls",
+            "-f", "state=open", "-f", f"head={username}:{branch_name}",
+        ]))
+        if existing:
+            pr = existing[0]
+            if pr["base"]["ref"] != username:
+                run_gh(repo_dir, ["pr", "edit", str(pr["number"]), "--repo", COURSE_REPOSITORY, "--base", username])
+            print(f"Submission updated: {pr['html_url']}")
+            return
+        body = f"Automated submission for `{week}`.\n\nLocal challenge tests passed. Merge into `{username}` to retain this student's work.\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md") as body_file:
+            body_file.write(body)
+            body_file.flush()
+            url = run_gh(repo_dir, [
+                "pr", "create", "--repo", COURSE_REPOSITORY,
+                "--head", f"{username}:{branch_name}", "--base", username,
+                "--title", f"Submission: {week} ({username})", "--body-file", body_file.name,
+            ])
+        print(f"Submission successful: {url}")
+    finally:
+        checked_git(["checkout", original_branch], repo_dir)
 
 
 def main():
@@ -270,7 +252,11 @@ def main():
         print("Test run completed.")
         sys.exit(0)
 
-    handle_submission(repo_dir, target_week)
+    try:
+        handle_submission(repo_dir, target_week)
+    except (RuntimeError, ValueError) as error:
+        print(f"{RED}Submission could not finish:{RESET} {error}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

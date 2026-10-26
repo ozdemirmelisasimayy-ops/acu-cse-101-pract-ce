@@ -1,8 +1,11 @@
 """Install and activate scheduled fork updates during the student's initial sync."""
 
 import json
+import os
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 
 try:
     from .course_automation import COURSE_REPOSITORY, sync_branches
@@ -11,14 +14,46 @@ except ImportError:
 
 
 def github(repo_dir, *args, data=None):
-    result = subprocess.run(
-        ["gh", "api", *args, *(["--input", "-"] if data is not None else [])],
-        cwd=repo_dir, input=json.dumps(data) if data is not None else None,
-        capture_output=True, text=True, check=False,
+    try:
+        result = subprocess.run(
+            ["gh", "api", *args, *(["--input", "-"] if data is not None else [])],
+            cwd=repo_dir, input=json.dumps(data) if data is not None else None,
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout) if result.stdout.strip() else {}
+        err_msg = result.stderr.strip() or "Unable to enable scheduled fork updates."
+    except FileNotFoundError:
+        err_msg = "GitHub CLI (gh) is not installed."
+
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise RuntimeError(err_msg)
+
+    path = args[0] if args else ""
+    method = "GET"
+    if "--method" in args:
+        idx = args.index("--method")
+        if idx + 1 < len(args):
+            method = args[idx + 1]
+
+    req = urllib.request.Request(
+        f"https://api.github.com/{path.lstrip('/')}",
+        data=json.dumps(data).encode() if data is not None else None,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
     )
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "Unable to enable scheduled fork updates.")
-    return json.loads(result.stdout) if result.stdout.strip() else {}
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read()
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"GitHub API returned {error.code}: {error.reason}") from error
 
 
 def enable_fork_sync(repo_dir):

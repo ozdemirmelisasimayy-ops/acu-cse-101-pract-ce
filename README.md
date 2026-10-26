@@ -29,6 +29,71 @@ In your forked repository, click the green **Code** button, select the **Codespa
 ---
 
 
+## Missing Course Tasks or Python Run button
+
+Open **Terminal → New Terminal** in your Codespace. From the repository folder,
+run the diagnostic even if the bottom menu is missing:
+
+```bash
+bash scripts/check_environment.sh --check
+```
+
+To install missing course packages and required editor extensions:
+
+```bash
+bash scripts/check_environment.sh --repair
+```
+
+Repair can take several minutes when downloading extensions. Network or install
+failures are reported; restore connectivity and rerun the command. It does not
+change your answers or Git branches. It requires the course's Python 3.12+
+container; it does not install a replacement system Python.
+
+If Python is missing or too old, use the Command Palette
+(**Ctrl+Shift+P**, or **Cmd+Shift+P** on macOS) → **Codespaces: Rebuild Container**.
+If Codespaces reports recovery mode, open **View creation log** and ask your TA
+to resolve the reported container/setup failure before rebuilding again.
+
+After repair, use **Developer: Reload Window**. If the top Run button still
+fails, open a `.py` file and choose **Python: Select Interpreter → Enter
+interpreter path**, then enter `/usr/local/bin/python`. An earlier interpreter
+selection can override the repository default.
+
+If **Course Tasks** is still missing:
+
+- In Extensions, verify **Tasks** (`dragoscv.tasks2`) is installed and enabled in
+  this Codespace. Also verify **Python**, **Pylance**, and **Python Debugger** are
+  enabled. Installation checks cannot prove that an extension activated.
+- Enable **View → Appearance → Status Bar** and reload the window.
+- Use **Command Palette → Tasks: Run Task** to access **Run Tests**, **Submit**,
+  **Sync Course**, **Play**, and **Check Environment** without the menu.
+
+### TA rollout for existing Codespaces
+
+1. Save all open student files. Bring the latest course files into the existing
+   workspace using **Tasks: Run Task → Sync Course**, or
+   `python3 scripts/sync_course.py` from the repository folder. If Python itself
+   is unavailable, inspect the creation log and rebuild the existing container
+   first, then sync. Resolve sync errors with the TA; do not reset student work.
+2. Confirm the updated `scripts/check_environment.sh` and container configuration
+   are present. If the diagnostic file is missing, the update has not arrived.
+   Rebuild the container to apply the updated configuration. Merely restarting
+   or syncing repository files does not apply container configuration changes.
+3. Run the diagnostic and repair commands above, then reload the window and
+   correct the interpreter selection if needed.
+4. Open a Python exercise and verify that the top Run button and **Course Tasks
+   → Play** execute it, and **Run Tests** launches pytest. Unfinished answers can
+   fail course tests even when the environment is healthy.
+
+New and rebuilt Codespaces check the environment whenever the editor attaches.
+This read-only check is limited to 45 seconds and records output in the ignored
+`.course-environment.log` at the repository root. Incomplete checks do not block
+the editor; run the repair command in its terminal. Extension downloads may
+still be finishing on the first attachment, so rerun the check afterward.
+Keep existing Codespaces and student branches; deletion/recreation is not the
+normal recovery procedure. Workspace files survive a container rebuild, but
+customizations outside `/workspaces` may not.
+
 ## 📅 Course Curriculum & Progressive Weekly Releases
 
 Exercises are released progressively week by week. Each week's challenge folder is kept in an independent release module:
@@ -38,8 +103,7 @@ Exercises are released progressively week by week. Each week's challenge folder 
 | **01** | [`exercises/week_01_intro/`](exercises/week_01_intro/) | Ch. 1 & 2 | The Way of the Program & Basic Arithmetic | **Released** |
 | **02** | `exercises/week_02_variables/` | Ch. 2 | Variables, Expressions and Statements | *Weekly Release* |
 | **03** | `exercises/week_03_functions/` | Ch. 3 | Functions, Parameters and Return Values | *Weekly Release* |
-| **04** | `exercises/week_04_conditionals_recursion/` | Ch. 5 | Conditionals, Booleans & Recursion | *Weekly Release* |
-| **05** | `exercises/week_05_iteration/` | Ch. 7 | Iteration, Loops, Newton's Square Root | *Weekly Release* |
+| **04–05** | [`exercises/week_04_conditions_loops_recursion/`](exercises/week_04_conditions_loops_recursion/) | Ch. 5 & 7 | Conditions, Boolean Expressions, for / while Loops & Simple Recursion | **Released together** |
 | **06** | `exercises/week_06_strings_lists/` | Ch. 8 & 10 | Strings, Indexing, Slicing & Lists | *Weekly Release* |
 | **07** | *Midterm I Review* | Ch. 1–10 | Comprehensive Practice Review | *In Class* |
 | **08** | `exercises/week_08_dictionaries_tuples/` | Ch. 11 & 12 | Dictionaries and Tuples | *Weekly Release* |
